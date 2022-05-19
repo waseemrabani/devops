@@ -2,7 +2,7 @@ version: 0.0
 os: linux
 files:
   - source: .
-    destination: /home/ec2-user/spring-boot-mongo/
+    destination: /home/ubuntu/spring-boot-mongo/
 hooks:
   AfterInstall:
    - location: setup.sh
