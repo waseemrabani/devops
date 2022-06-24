@@ -1,0 +1,1207 @@
+name: Pipeline for develop enviroment
+on:
+
+  pull_request:
+    branches:
+      - develop
+    types: [closed]
+    
+    
+    paths:
+      - 'core/**'
+      - 'ras-relay/**'
+      - 'ms-core/**'
+      - 'ms-store/**'
+      - 'ms-campaign/**'
+      - 'ms-watch/**'
+      - 'relay/**'
+      - 'mt-kidswatch/**'
+      - 'ckpush/ras-http-scripts/**'
+      - 'ras-script/**'
+      - 'ckpush/ras-scripts/**'
+      - '.github/**'
+      - 'auction-websockets/**'
+
+
+
+jobs:
+
+
+  whitelist:
+    name: whitelist
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Get Github action IP
+      id: ip
+      uses: haythem/public-ip@v1.2
+    - name: Setting environment variables..
+      run: |
+        echo "AWS_SG_NAME=github_whitelist_dev" >> $GITHUB_ENV
+        
+    - name: Add Github Actions IP to Security group
+      run: |
+        #aws ec2 authorize-security-group-ingress --group-name ${{ env.AWS_SG_NAME }} --protocol tcp --port 22 --cidr ${{ steps.ip.outputs.ipv4 }}/32    
+        aws ec2 authorize-security-group-ingress --group-name ${{ env.AWS_SG_NAME }} --protocol tcp --port 22 --cidr 0.0.0.0/0
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+
+
+
+  init:
+    name: init
+    runs-on: ubuntu-latest
+    outputs:
+      cloud_env: ${{ steps.setvars.outputs.cloud_env }}
+      build_env: ${{ steps.setvars.outputs.build_env }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 2
+
+
+      - name: Set variables
+        id: setvars
+        run: |
+          if [[ "${{github.base_ref}}" == "develop" || "${{github.ref}}" == "refs/heads/develop" ]]; then
+            echo "::set-output name=cloud_env::dev" 
+            echo "::set-output name=build_env::development"
+          fi
+          if [[ "${{github.base_ref}}" == "release" || "${{github.ref}}" == "refs/heads/release" ]]; then
+            echo "::set-output name=cloud_env::stg"
+            echo "::set-output name=build_env::release"
+          fi
+  check:
+    name: identification of active changes
+    outputs:
+      cloud_env: ${{ needs.init.outputs.cloud_env }}
+      build_env: ${{ needs.init.outputs.build_env }}
+      run_job_ras-relay : ${{ steps.check_files.outputs.run_job_ras-relay }}
+      run_job_auction-websockets : ${{ steps.check_files.outputs.run_job_auction-websockets }}
+      run_job_ras-script : ${{ steps.check_files.outputs.run_job_ras-script }}
+      run_job_core : ${{ steps.check_files.outputs.run_job_core }}
+      run_job_ms-core : ${{ steps.check_files.outputs.run_job_ms-core }}
+      run_job_ms-store : ${{ steps.check_files.outputs.run_job_ms-store }}
+      run_job_ms-watch : ${{ steps.check_files.outputs.run_job_ms-watch }}
+      run_job_ms-campaign : ${{ steps.check_files.outputs.run_job_ms-campaign }}
+      run_job_mt-kidswatch : ${{ steps.check_files.outputs.run_job_mt-kidswatch }}
+      run_job_relay : ${{ steps.check_files.outputs.run_job_relay }}
+      run_job_ras_http : ${{ steps.check_files.outputs.run_job_ras_http }}  
+      run_job_ckpush_fcm : ${{ steps.check_files.outputs.run_job_ckpush_fcm }}
+
+
+
+    runs-on: ubuntu-latest
+    needs: init
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 2
+
+
+      - name: check modified files for mscore
+        id: check_files
+        run: |
+          echo "========== check paths of modified files =========="
+          git diff --name-only HEAD^ HEAD | xargs -L1 dirname | uniq | awk  -F '/' '{print $1}' > files.txt
+          for p in $(cat files.txt); do 
+          echo "$p";
+           if [[ $p == ckpush ]]; then
+           #git diff --name-only HEAD^ HEAD | xargs -L1 dirname | uniq | awk  '{print $1 ,$2}' > files2.txt
+           git diff --name-only HEAD^ HEAD | xargs -L1 dirname | uniq | awk -F'/' '{print $1" "$2}' | awk '{print $2}' > files2.txt
+           for p2 in $(cat files2.txt); do
+           echo "$p2";
+           
+                      if [[ $p2 == ras-http-scripts ]]; then
+                      echo "::set-output name=run_job_ras_http::true"
+                      elif [[ $p2 == ras-scripts ]]; then
+                      echo "::set-output name=run_job_ckpush_fcm::true"
+                      fi
+                      done
+           
+           else
+           echo "no recurive folder found"
+           fi
+        
+          echo "::set-output name=run_job_"$p"::true"
+          done
+  job1:
+    outputs: 
+       run_job_core: ${{ needs.check.outputs.run_job_core }}
+    name: job for gw core
+    needs: check
+
+    if: needs.check.outputs.run_job_core == 'true'
+         
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" core service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          echo "${{needs.check.outputs.cloud_env}}"
+          cd core && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo MSCORE_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-gw.development.yml xplora_gw
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+###########################################   ms-core   ##############################
+
+  job2:
+    outputs:
+       run_job_ms-core: ${{ needs.check.outputs.run_job_ms-core }}
+    name: job for ms core
+    needs: check
+    if: needs.check.outputs.run_job_ms-core == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ms-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" ms core service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: | 
+          echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      
+
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo MSCORE_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ms-core.development.yml xplora_ms
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+
+
+###########################################   ms-watch   ##############################
+
+
+
+
+  job3:
+    outputs:
+       run_job_ms-watch: ${{ needs.check.outputs.run_job_ms-watch }}
+    name: job for ms watch
+    needs: check
+    if: needs.check.outputs.run_job_ms-watch == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ms-watch
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" ms watch service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+       
+
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo MSWATCH_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ms-watch.development.yml xplora_ms
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+
+
+        ###########################################   ms-store   ##############################
+
+
+
+
+  job4:
+    outputs:
+       run_job_ms-store: ${{ needs.check.outputs.run_job_ms-store }}
+    name: job for ms store
+    needs: check
+    if: needs.check.outputs.run_job_ms-store == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ms-store
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" ms-store service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo MSSTORE_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ms-store.development.yml xplora_ms
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+
+
+                ###########################################   ms-campaign   ##############################
+
+
+
+
+  job5:
+    outputs:
+       run_job_ms-campaign: ${{ needs.check.outputs.run_job_ms-campaign }}
+    name: job for ms campaign
+    needs: check
+    if: needs.check.outputs.run_job_ms-campaign == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ms-campaign
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" ms-campaign service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo MSCAMPAIGN_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ms-campaign.development.yml xplora_ms
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG 
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+
+###################################### mt kidwatch #############################################################
+
+
+  job6:
+    outputs:
+       run_job_mt-kidswatch: ${{ needs.check.outputs.run_job_mt-kidswatch }}
+    name: job for mt kidwatch
+    needs: check
+    if: needs.check.outputs.run_job_mt-kidswatch == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: mt-kidswatch
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" mt kidwatch service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          #docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo MQTT_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-mqtt.development.yml xplora_mqtt
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+############################################# relay ###################################
+
+
+  job7:
+    outputs:
+       run_job_relay: ${{ needs.check.outputs.run_job_relay }}
+    name: job for ms relay
+    needs: check
+    if: needs.check.outputs.run_job_relay == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: relay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" relay service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          # docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo RELAY_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-relay.development.yml xplora_relay
+            echo $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+########################################################ras http script #############################
+
+  job8:
+    outputs:
+       run_job_ras_http: ${{ needs.check.outputs.run_job_ras_http }}
+    name: job for chpush fcm http script
+    needs: check
+    if: needs.check.outputs.run_job_ras_http == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ras-http-scripts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" ras-http-scripts  service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ckpush/${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          # docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo FCM_IMG_SCRIPT_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ckpushfcmscript.development.yml xplora_fcm
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+#########################################################ckpush fcm ########################################################################################################################
+
+
+  job9:
+    outputs:
+       run_job_ckpush_fcm: ${{ needs.check.outputs.run_job_ckpush_fcm }}
+    name: job for ckpush-fcm
+    needs: check
+    if: needs.check.outputs.run_job_ckpush_fcm == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ras-scripts 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" core ras-scripts is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ckpush/${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          # docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo FCM_IMG_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ckpushfcm.development.yml xplora_fcm
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+#################################################ras relay #######################################
+
+  job10:
+    outputs:
+       run_job_ras-relay: ${{ needs.check.outputs.run_job_ras-relay }}
+    name: job for ras relay 
+    needs: check
+    if: needs.check.outputs.run_job_ras-relay == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ras-relay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+      - name: display string
+        run: |
+          echo "The cloudenv ris is: ${{ needs.check.outputs.cloud_env }}"
+          echo "The buildenv ris is: ${{ needs.check.outputs.build_env }}"
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" ras-relay service is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd && echo ${{needs.check.outputs.build_env}}
+          docker build --build-arg BUILDER_TYPE=${{needs.check.outputs.build_env}} -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          # docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-gw-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo IMG_RAS_RELAY_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose.rasrelay.development.yml xplora_ras_relay
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+################################################## ras script new###################################
+
+
+
+
+  job11:
+    outputs:
+       run_job_ras-script: ${{ needs.check.outputs.run_job_ras-script }}
+    name: job for ras scripts new
+    needs: check
+    if: needs.check.outputs.run_job_ras-script == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: ras-script 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" core ras-scripts is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.development .
+          # docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo SCRIPT_IMG_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-ras-script.development.yml xplora_ras_script
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+  job12:
+    outputs:
+       run_job_run_job_auction-websockets: ${{ needs.check.outputs.run_job_auction-websockets }}
+    name: job for auctions-websockets
+    needs: check
+    if: needs.check.outputs.run_job_auction-websockets == 'true'
+
+    runs-on: ubuntu-latest
+    env:
+      SERVICE: auction-websockets 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Translate ENV variables
+        run: |
+          printenv
+          curl -X POST -H 'Content-type: application/json' --data '{"text":" websocket auction  is started!"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+      - name: Build & tag docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        run: |
+          
+          cd ${{ env.SERVICE }} && pwd
+          docker build --build-arg BUILDER_TYPE="${{needs.check.outputs.build_env}}" -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.beta .
+          # docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: Push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+      - name: swarm deployment
+        uses: appleboy/ssh-action@master
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}
+          IMAGE_TAG: ${{ github.sha }}
+
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.DEVELOP_KEY }}
+          port: 22
+          script: |
+            #ls -altr
+            aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | docker login --username AWS --password-stdin 409947039396.dkr.ecr.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com
+            #eval sudo $(aws ecr get-login --no-include-email --region ${{ secrets.AWS_DEFAULT_REGION }})
+            sudo docker pull ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            echo ${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }}
+            cd /home/ubuntu/goplay/xplora-o2o-apiv2/swarm/;
+            sudo IMG_VER=${{ steps.login-ecr.outputs.registry }}/${{needs.check.outputs.cloud_env}}-goplay-${{ env.SERVICE }}:${{ github.sha }} docker stack deploy -c docker-compose-auctionwebsockets.development.yml xplora_auction-websockets
+      - name: Notify slack success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,ref # selectable (default: repo,message)
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # required
+            #MATRIX_CONTEXT: ${{ toJson(matrix) }} # required
+        if: always() # Pick up events even if the job fails or is canceled.
+
+
+
+
+  whitelist_remove:
+    name: whitelist_remove
+    runs-on: ubuntu-18.04
+
+    needs: [job1, job2, job3, job4, job5, job6, job7, job8, job9, job10, job11, job12]
+
+    if: |
+         always() &&
+         (needs.job1.result == 'success' || needs.job1.result == 'skipped') &&
+         (needs.job2.result == 'success' || needs.job2.result == 'skipped') &&
+         (needs.job3.result == 'success' || needs.job3.result == 'skipped') &&
+         (needs.job4.result == 'success' || needs.job4.result == 'skipped') &&
+         (needs.job5.result == 'success' || needs.job5.result == 'skipped') &&
+         (needs.job6.result == 'success' || needs.job6.result == 'skipped') &&
+         (needs.job7.result == 'success' || needs.job7.result == 'skipped') &&
+         (needs.job8.result == 'success' || needs.job8.result == 'skipped') &&
+         (needs.job9.result == 'success' || needs.job9.result == 'skipped') &&
+         (needs.job10.result == 'success' || needs.job10.result == 'skipped') &&
+         (needs.job11.result == 'success' || needs.job11.result == 'skipped') &&
+         (needs.job12.result == 'success' || needs.job12.result == 'skipped') &&
+         (needs.job1.outputs.run_job_core == 'true') || 
+         (needs.job2.outputs.run_job_ms-core == 'true') ||
+         (needs.job3.outputs.run_job_ms-watch == 'true') ||
+         (needs.job4.outputs.run_job_ms-store == 'true') ||
+         (needs.job5.outputs.run_job_ms-campaign == 'true') ||  
+         (needs.job6.outputs.run_job_mt-kidswatch == 'true') ||
+         (needs.job7.outputs.run_job_relay == 'true') ||
+         (needs.job8.outputs.run_job_ras_http == 'true') ||
+         (needs.job9.outputs.run_job_ckpush_fcm == 'true') ||
+         (needs.job10.outputs.run_job_ras-relay == 'true') ||
+         (needs.job11.outputs.run_job_ras-script == 'true') ||
+         (needs.job12.outputs.run_job_auction-websockets == 'true') 
+    steps:
+    - name: Get Github action IP
+      id: ip
+      uses: haythem/public-ip@v1.2
+    - name: Setting environment variables..
+      run: |
+        echo "AWS_SG_NAME=github_whitelist_dev" >> $GITHUB_ENV
+    - name: Add Github Actions IP to Security group
+      run: |
+        #aws ec2 revoke-security-group-ingress --group-name ${{ env.AWS_SG_NAME }} --protocol tcp --port 22 --cidr ${{ steps.ip.outputs.ipv4 }}/32
+        aws ec2 revoke-security-group-ingress --group-name ${{ env.AWS_SG_NAME }} --protocol tcp --port 22 --cidr 0.0.0.0/0
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}

@@ -1,0 +1,345 @@
+# Github shor branch 명과 docker 이미지가 실행되는 환경의 이름이 동일해야 한다.
+# 무조건 Docker 이미지를 만들고, 만들어진 이미지를 배포 한다.
+# Github Action, AWS S3, AWS ECR 을 사용해서 배포 하는 환경이며, 다른 환경이면 스크립트를 변경 해야 한다.
+
+name: ras-relay(build and deploy)
+on:
+  #  push:
+  #    branches:
+  #      - development
+  #    paths:
+  #      - 'ras-youtube/*'
+  #  pull_request:
+  #    branches:
+  #      - development
+  #    paths:
+  #      - 'ras-youtube/*'
+
+  # Allows you to run this workflow manually from the Actions tab
+  # 수동으로 workflow 동작. input 으로 값을 입력 받을 수는 있지만, dropdown 으로 처리 할 수 없음. textfield 로 직접 입력해야 함.
+  workflow_dispatch:
+    inputs:
+      # development branch 일때 사용
+      # 소스 빌딩을 위한 builder 기본 이미지의 Docker tag name
+      # 사용할 기본 builder 이미지가 변경되면 default 값을 변경 하도록 한다.
+      development_build_base_tag_name:
+        description: 'Develop - version of the base image for building'
+        required: false
+        default: 'development_20210914_8'
+      development_deploy_base_tag_name:
+        description: 'Develop - The version of the base image for creating a deploy image'
+        required: false
+        default: 'development_20210914_2'
+      # production branch 일때 사용
+      # 소스 빌딩을 위한 builder 기본 이미지의 Docker tag name
+      # 사용할 기본 builder 이미지가 변경되면 default 값을 변경 하도록 한다.
+      production_build_base_tag_name:
+        description: 'Production - version of the base image for building'
+        required: false
+        default: 'production_20210923_17'
+      production_deploy_base_tag_name:
+        description: 'Production - The version of the base image for creating a deploy image'
+        required: false
+        default: 'production_20210923_3'
+
+jobs:
+  # 선택한 branch 를 확인하여 지정된 branch 가 아니면 action 을 하지 않는 용도
+  # action 동작으로 지정된 branch name 을 구한다.(ref 등이 빠진 short name)
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.branch_check.outputs.branch_short_name}}
+    steps:
+      - name: Branch check
+        id: branch_check
+        shell: bash
+        run: echo "::set-output name=branch_short_name::$(echo $GITHUB_REF | cut -d'/' -f 3)"
+
+  # Docker 이미지를 만든다.(branch 가 master, develop 일때만 동작한다.)
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: ${{ needs.prepare.outputs.branch == 'master' || needs.prepare.outputs.branch == 'develop' }}
+    outputs:
+      builder_type: ${{ steps.set_variable.outputs.builder_type }}
+      s3_bucket_name: ${{ steps.set_variable.outputs.s3_bucket_name }}
+      s3_obj_key: ${{ steps.set_variable.outputs.s3_obj_key }}
+      s3_dest: ${{ steps.set_variable.outputs.s3_dest }}
+      deploy_app_name: ${{ steps.set_variable.outputs.deploy_app_name }}
+      deploy_group_name: ${{ steps.set_variable.outputs.deploy_group_name }}
+    env:
+      #---------------------------------------
+      # 여기 값만 수정하면 동작 하도록 환경을 만들어 두었음.
+      # 추후 변경시에도 이곳 외에 다른 곳에서 고정된 값을 사용하지 않도록 주의 한다.
+      #---------------------------------------
+      # ::set-env 명령이 동작하도록 옵션 설정
+      #ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+      BRANCH_SHORT_NAME: ${{ needs.prepare.outputs.branch }}
+      # Docker 이미지 만들때 필요한 정보
+      AWS_REGION: "eu-central-1"
+      ECR_REPOSITORY: "o2o/ras_relay"
+      # 배포 파일 만들때 ECR_REPOSITORY 값을 sed 하기 위해서 slash 앞에 역 slash 를 추가함.
+      ECR_REPOSITORY_FOR_SED: "o2o\\/ras_relay"
+      DOCKER_FILE_PATH: "./ras-relay/Dockerfile"
+      DOCKER_SRC_PATH: "./ras-relay"
+      # S3 서버 정보
+      S3_BUCKET_NAME: "o2o-codedeploy-meta"
+      # S3 버킷 다음에 붙을 경로 이며, slash 로 시작하면 안 됨
+      S3_OBJ_DIR_PATH: "ras-relay"
+      # S3 업로드 할때 파일명 prefix. 이것 뒤에 docker 이미지 태그와 .zip 스트링이 붙을 것임
+      ZIP_FILE_PREFIX_NAME: "ras_relay_"
+      # Docker 이미지 환경 변수로 설정할 타임존
+      TIME_ZONE: Europe/London
+      # CodeDeploy 앱 명
+      CODE_DEPLOY_APP_NAME: "xplora-o2o"
+      # CodeDeploy 앱내 그룹명 prefix. 이것 뒤에 branch 명(개발-devlopment/상용-production 구분)이 붙을 것임
+      CODE_DEPLOY_GROUP_PREFIX_NAME: "ras-relay-"
+      # development 일때 Docker 컨테이너 실행하는 linux 유저값
+      RUN_USER_ID_DEVELOPMENT: "root"
+      RUN_UID_DEVELOPMENT: "0"
+      RUN_GID_DEVELOPMENT: "0"
+      # production 버전 일때 Docker 컨테이너 실행하는 linux 유저값
+      RUN_USER_ID_PRODUCTION: "root"
+      RUN_UID_PRODUCTION: "0"
+      RUN_GID_PRODUCTION: "0"
+      # build 타입 구분 스트링. 개발/상용
+      BUILDER_TYPE_DEVELOPMENT: "development"
+      BUILDER_TYPE_PRODUCTION: "production"
+      # 빌드 베이스 이미지의 ECR 리포지토리명
+      BUILD_BASE_ECR_REPOSITORY: "o2o/builder_base2"
+      BUILD_BASE_ECR_REPOSITORY_FOR_SED: "o2o\\/builder_base2"
+      # Deploy 베이스 이미지의 ECR 리포지토리명
+      DEPLOY_BASE_ECR_REPOSITORY: "o2o/deploy_base2"
+      DEPLOY_BASE_ECR_REPOSITORY_FOR_SED: "o2o\\/deploy_base2"
+      # aws secret
+      O2O_AWS_ACCESS_KEY: "AKIAV64V7M2SEMFCAKVC"
+      O2O_AWS_SECRET_ACCESS_KEY: "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"
+
+    steps:
+      #----------------------------------------------------
+      # 동작하는 날짜를 구한다.
+      #----------------------------------------------------
+      - name: Get current day
+        id: time
+        uses: nanzm/get-time-action@v1.1
+        with:
+          timeZone: 0
+          format: 'YYYYMMDD'
+
+      #----------------------------------------------------
+      # Github branch short name 을 구한다.(prepare job 에서 처리하도록 변경)
+      #----------------------------------------------------
+      # - name: Get Github branch short name
+      #   shell: bash
+      #   run: |
+      #     echo "BRANCH_SHORT_NAME=$(echo $GITHUB_REF | cut -d'/' -f 3)" >> $GITHUB_ENV
+
+      #----------------------------------------------------
+      # branch에 따른 빌딩 할때 사용될 환경 변수값을 설정 한다.
+      #----------------------------------------------------
+      # BUILDER_TYPE : 이미지가 동작할 서버에 따른 이미지 종류 구분. development, production
+      # RUN_USER_ID : Docker container 를 실행하는 ubuntu 서버 계정의 아이디
+      # RUN_UID : Docker container 를 실행하는 ubuntu 서버 계정의 uid. id -u <계정명> 으로 구한 값
+      # RUN_GID : Docker container 를 실행하는 ubuntu 서버 계정의 gid. id -g <계정명> 으로 구한 값
+      # LAST_IMAGE_TAG : 최종 생성될 이미지의 태그(버전 구분)
+      #----------------------------------------------------
+      - name: Set custom environment variables
+        id: set_variable
+        run: |
+          if [[ "${{ env.BRANCH_SHORT_NAME }}" == "master" ]]; then
+            echo "RUN_USER_ID=${{ env.RUN_USER_ID_PRODUCTION }}" >> $GITHUB_ENV
+            echo "RUN_UID=${{ env.RUN_UID_PRODUCTION }}" >> $GITHUB_ENV
+            echo "RUN_GID=${{ env.RUN_GID_PRODUCTION }}" >> $GITHUB_ENV
+            echo "BUILD_BASE_TAG_NAME=${{ github.event.inputs.production_build_base_tag_name }}" >> $GITHUB_ENV
+            echo "DEPLOY_BASE_TAG_NAME=${{ github.event.inputs.production_deploy_base_tag_name }}" >> $GITHUB_ENV
+            BUILDER_TYPE=$(echo "${{ env.BUILDER_TYPE_PRODUCTION }}")
+          else
+            echo "RUN_USER_ID=${{ env.RUN_USER_ID_DEVELOPMENT }}" >> $GITHUB_ENV
+            echo "RUN_UID=${{ env.RUN_UID_DEVELOPMENT }}" >> $GITHUB_ENV
+            echo "RUN_GID=${{ env.RUN_GID_DEVELOPMENT }}" >> $GITHUB_ENV
+            echo "BUILD_BASE_TAG_NAME=${{ github.event.inputs.development_build_base_tag_name }}" >> $GITHUB_ENV
+            echo "DEPLOY_BASE_TAG_NAME=${{ github.event.inputs.development_deploy_base_tag_name }}" >> $GITHUB_ENV
+            BUILDER_TYPE=$(echo "${{ env.BUILDER_TYPE_DEVELOPMENT }}")
+          fi
+          LAST_IMAGE_TAG=$(echo "${BUILDER_TYPE}_${{ steps.time.outputs.time }}_${{ github.run_number }}")
+          ZIP_FILE_NAME=$(echo "${{ env.ZIP_FILE_PREFIX_NAME }}${LAST_IMAGE_TAG}.zip")
+          S3_BUCKET_NAME=$(echo "${{ env.S3_BUCKET_NAME }}")
+          S3_OBJ_KEY=$(echo "${{ env.S3_OBJ_DIR_PATH }}/${ZIP_FILE_NAME}")
+          S3_DEST=$(echo "s3://${S3_BUCKET_NAME}/${S3_OBJ_KEY}")
+          CODE_DEPLOY_APP_NAME=$(echo "${{ env.CODE_DEPLOY_APP_NAME }}")
+          CODE_DEPLOY_GROUP_NAME=$(echo "${{ env.CODE_DEPLOY_GROUP_PREFIX_NAME }}${BUILDER_TYPE}")
+          echo "BUILDER_TYPE=${BUILDER_TYPE}" >> $GITHUB_ENV
+          echo "LAST_IMAGE_TAG=${LAST_IMAGE_TAG}" >> $GITHUB_ENV
+          echo "ZIP_FILE_NAME=${ZIP_FILE_NAME}" >> $GITHUB_ENV
+          echo "S3_OBJ_KEY=${S3_OBJ_KEY}" >> $GITHUB_ENV
+          echo "S3_DEST=${S3_DEST}" >> $GITHUB_ENV
+          echo "S3_BUCKET_NAME=${S3_BUCKET_NAME}" >> $GITHUB_ENV
+          echo "::set-output name=builder_type::$(echo ${BUILDER_TYPE})"
+          echo "::set-output name=s3_bucket_name::$(echo ${S3_BUCKET_NAME})"
+          echo "::set-output name=s3_obj_key::$(echo ${S3_OBJ_KEY})"
+          echo "::set-output name=s3_dest::$(echo ${S3_DEST})"
+          echo "::set-output name=deploy_app_name::$(echo ${CODE_DEPLOY_APP_NAME})"
+          echo "::set-output name=deploy_group_name::$(echo ${CODE_DEPLOY_GROUP_NAME})"
+      #----------------------------------------------------
+      # 환경 변수 제대로 잡혔는지 체크 한다.
+      #----------------------------------------------------
+      - name: Print environment variable
+        run: |
+          echo "RUN_USER_ID - ${{ env.RUN_USER_ID }}"
+          echo "RUN_UID - ${{ env.RUN_UID }}"
+          echo "RUN_GID - ${{ env.RUN_GID }}"
+          echo "BUILDER_TYPE - ${{ env.BUILDER_TYPE }}"
+          echo "BUILD_BASE_TAG_NAME - ${{ env.BUILD_BASE_TAG_NAME }}"
+          echo "DEPLOY_BASE_TAG_NAME - ${{ env.DEPLOY_BASE_TAG_NAME }}"
+          echo "AWS_REGION - ${{ env.AWS_REGION }}"
+          echo "ECR_REPOSITORY - ${{ env.ECR_REPOSITORY }}"
+          echo "DOCKER_FILE_PATH - ${{ env.DOCKER_FILE_PATH }}"
+          echo "DOCKER_SRC_PATH - ${{ env.DOCKER_SRC_PATH }}"
+          echo "LAST_IMAGE_TAG - ${{ env.LAST_IMAGE_TAG }}"
+          echo "ZIP_FILE_NAME - ${{ env.ZIP_FILE_NAME }}"
+          echo "S3_OBJ_KEY - ${{ env.S3_OBJ_KEY }}"
+          echo "S3_DEST - ${{ env.S3_DEST }}"
+          echo "S3_BUCKET_NAME - ${{ env.S3_BUCKET_NAME }}"
+      #----------------------------------------------------
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      #----------------------------------------------------
+      - name: Checkout source code
+        uses: actions/checkout@v2
+
+      #----------------------------------------------------
+      # AWS ECR/S3에 업로드 하기 위해 AWS credential 설정
+      #----------------------------------------------------
+      - name: Config AWS credential
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.O2O_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ env.O2O_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      #----------------------------------------------------
+      # AWS ECR에 로그인
+      #----------------------------------------------------
+      - name: Login to AWS ECR
+        id: login_ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      #----------------------------------------------------
+      # builder base 이미지 ECR 에서 Pull 을 한 후,
+      # Dockerfile 의 builder 이미지 라인을 해당 이미지에 맞는 값으로 변경 한다.
+      #----------------------------------------------------
+      - name: Pull builder base image
+        env:
+          ECR_REGISTRY: ${{ steps.login_ecr.outputs.registry }}
+        run: |
+          echo "build_base_tag_name - ${{ env.BUILD_BASE_TAG_NAME }}"
+          echo "ECR_REGISTRY - ${ECR_REGISTRY}"
+          docker pull ${ECR_REGISTRY}/${{ env.BUILD_BASE_ECR_REPOSITORY }}:${{ env.BUILD_BASE_TAG_NAME }}
+          sed -i "s/FROM build_base:tag AS builder/FROM ${ECR_REGISTRY}\/${{ env.BUILD_BASE_ECR_REPOSITORY_FOR_SED }}:${{ env.BUILD_BASE_TAG_NAME }} AS builder/g" ${{ env.DOCKER_FILE_PATH }}
+      #----------------------------------------------------
+      # deploy base 이미지 ECR 에서 Pull 을 한 후,
+      # Dockerfile 의 deploy 이미지 라인을 해당 이미지에 맞는 값으로 변경 한다.
+      #----------------------------------------------------
+      - name: Pull builder base image
+        env:
+          ECR_REGISTRY: ${{ steps.login_ecr.outputs.registry }}
+        run: |
+          echo "deploy_base_tag_name - ${{ env.DEPLOY_BASE_TAG_NAME }}"
+          docker pull ${ECR_REGISTRY}/${{ env.DEPLOY_BASE_ECR_REPOSITORY }}:${{ env.DEPLOY_BASE_TAG_NAME }}
+          sed -i "s/FROM deploy_base:tag/FROM ${ECR_REGISTRY}\/${{ env.DEPLOY_BASE_ECR_REPOSITORY_FOR_SED }}:${{ env.DEPLOY_BASE_TAG_NAME }}/g" ${{ env.DOCKER_FILE_PATH }}
+      #----------------------------------------------------
+      # Docker 이미지 생성 후, AWS ECR에 업로드
+      #----------------------------------------------------
+      - name: Build, tag and push image to AWS ECR
+        id: build_image
+        env:
+          ECR_REGISTRY: ${{ steps.login_ecr.outputs.registry }}
+          IMAGE_TAG: ${{ env.LAST_IMAGE_TAG }}
+        run: |
+          docker image build \
+              --build-arg BUILDER_TYPE=${{ env.BUILDER_TYPE }} \
+              --build-arg RUN_USER_ID=${{ env.RUN_USER_ID }} \
+              -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG \
+              -f ${{ env.DOCKER_FILE_PATH }} \
+              ${{ env.DOCKER_SRC_PATH }}
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+      #----------------------------------------------------
+      # CodeDeploy 파일을 AWS S3에 업로드
+      #----------------------------------------------------
+      - name: Upload to S3
+        run: |
+          mv ${{ env.DOCKER_SRC_PATH }}/.aws_code_deploy/appspec.${{ env.BUILDER_TYPE }}.yml ./appspec.yml
+          mv ${{ env.DOCKER_SRC_PATH }}/.aws_code_deploy/build_and_deploy.${{ env.BUILDER_TYPE }}.sh ./deploy.sh
+          sed -i "4s/.*/ECR_URL=${{ steps.login_ecr.outputs.registry }}/g" ./deploy.sh
+          sed -i "6s/.*/AWS_REGION=${{ env.AWS_REGION }}/g" ./deploy.sh
+          sed -i "8s/.*/ECR_REPOSITORY=${{ env.ECR_REPOSITORY_FOR_SED }}/g" ./deploy.sh
+          sed -i "10s/.*/IMAGE_TAG=${{ env.LAST_IMAGE_TAG }}/g" ./deploy.sh
+          sed -i "12s/.*/RUN_USER_ID=${{ env.RUN_USER_ID }}/g" ./deploy.sh
+          mv ${{ env.DOCKER_SRC_PATH }}/docker-compose.${{ env.BUILDER_TYPE }}.yml ./docker-compose.yml
+          zip ${{ env.ZIP_FILE_NAME }} \
+              ./appspec.yml \
+              ./deploy.sh \
+              ./docker-compose.yml
+          aws s3 cp --region ${{ env.AWS_REGION }} --acl private ./${{ env.ZIP_FILE_NAME }} \
+              ${{ env.S3_DEST }}
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ needs.prepare.outputs.branch == 'master' || needs.prepare.outputs.branch == 'develop' }}
+    env:
+      BUILDER_TYPE: ${{ needs.build.outputs.builder_type }}
+      S3_BUCKET_NAME: ${{ needs.build.outputs.s3_bucket_name }}
+      S3_OBJ_KEY: ${{ needs.build.outputs.s3_obj_key }}
+      S3_URL: ${{ needs.build.outputs.s3_dest }}
+      CODE_DEPLOY_APP_NAME: ${{ needs.build.outputs.deploy_app_name }}
+      CODE_DEPLOY_GROUP_NAME: ${{ needs.build.outputs.deploy_group_name }}
+      O2O_AWS_ACCESS_KEY: "AKIAV64V7M2SEMFCAKVC"
+      O2O_AWS_SECRET_ACCESS_KEY: "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"
+
+    steps:
+      #----------------------------------------------------
+      # 환경 변수 제대로 잡혔는지 체크 한다.
+      #----------------------------------------------------
+      - name: Print environment variable
+        run: |
+          echo "BUILDER_TYPE - ${{ env.BUILDER_TYPE }}"
+          echo "S3_BUCKET_NAME - ${{ env.S3_BUCKET_NAME }}"
+          echo "S3_OBJ_KEY - ${{ env.S3_OBJ_KEY }}"
+          echo "S3_URL - ${{ env.S3_URL }}"
+          echo "CODE_DEPLOY_APP_NAME - ${{ env.CODE_DEPLOY_APP_NAME }}"
+          echo "CODE_DEPLOY_GROUP_NAME - ${{ env.CODE_DEPLOY_GROUP_NAME }}"
+          echo "O2O_AWS_ACCESS_KEY - ${{ env.O2O_AWS_ACCESS_KEY }}"
+          echo "O2O_AWS_SECRET_ACCESS_KEY - ${{ env.O2O_AWS_SECRET_ACCESS_KEY }}"
+      #----------------------------------------------------
+      # AWS CodeDeploy 를 위한 AWS credential 설정
+      #----------------------------------------------------
+      - name: Config AWS credential
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.O2O_AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ env.O2O_AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      #----------------------------------------------------
+      # AWS CodeDeploy 를 실행 한다.
+      #----------------------------------------------------
+      - name: Deploy to EC2
+        run: |
+          aws deploy create-deployment \
+              --application-name ${{ env.CODE_DEPLOY_APP_NAME }} \
+              --deployment-config-name CodeDeployDefault.AllAtOnce \
+              --deployment-group-name ${{ env.CODE_DEPLOY_GROUP_NAME }} \
+              --s3-location bucket=${{ env.S3_BUCKET_NAME }},bundleType=zip,key=${{ env.S3_OBJ_KEY }}
+      #----------------------------------------------------
+      # SSH 서버 직접 연결 샘플
+      #----------------------------------------------------
+      #- name: deploy to EC2
+      #  uses: appleboy/ssh-action@master
+      #  with:
+      #    host: 15.165.112.85
+      #    port: 22
+      #    username: ubuntu
+      #    key: ${{ secrets.EDUXR_AWS_PEM }}
+      #    script: |
+      #      ls -al
+      #      sudo su - ras5
+      #      ls -al

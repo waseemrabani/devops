@@ -1,0 +1,50 @@
+import boto3
+import json
+#import string
+client = boto3.client('ec2')
+def lambda_handler(event, context):
+    
+    response = client.describe_client_vpn_routes(
+    ClientVpnEndpointId='cvpn-endpoint-017a73c36cdfe38f6',
+    
+)
+    
+    Dcider = response ['Routes'][0]['DestinationCidr']
+    print(Dcider)
+    Dcider1 = response ['Routes'][1]['DestinationCidr']
+    print(Dcider1)
+    Dcider2 = response ['Routes'][2]['DestinationCidr']
+    print(Dcider2)
+    Dcider3 = response ['Routes'][3]['DestinationCidr']
+    print(Dcider3)
+    Dcider4 = response ['Routes'][4]['DestinationCidr']
+    print(Dcider4)
+    Dcider5 = response ['Routes'][5]['DestinationCidr']
+    print(Dcider5)
+    Dcider6 = response ['Routes'][6]['DestinationCidr']
+    print(Dcider6)
+    Dcider7 = response ['Routes'][7]['DestinationCidr']
+    print(Dcider7)
+    Dcider8 = response ['Routes'][8]['DestinationCidr']
+    print(Dcider8)
+    Dcider9 = response ['Routes'][9]['DestinationCidr']
+    print(Dcider9)
+    Dcider10 = response ['Routes'][10]['DestinationCidr']
+    print(Dcider10)
+    #Dcider11 = response ['Routes'][11]['DestinationCidr']
+    #print(Dcider11)
+    
+    #print(Dcider1)
+    #ty = type(Dcider)
+    #print(ty)
+    #lis=list(Dcider)
+    #print(lis)
+    #arr = Dcider.split(',')
+    #print(arr)
+   # return(response)
+    
+    
+    #print(response)
+    
+    
+    

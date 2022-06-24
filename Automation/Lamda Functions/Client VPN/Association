@@ -1,0 +1,36 @@
+import boto3
+import json
+import os
+#import string
+client = boto3.client('ec2')
+client_lambda = boto3.client('lambda')
+AssociationId = os.environ['AssociationId']
+
+
+def lambda_handler(event, context):
+    response_disassociate = client.disassociate_client_vpn_target_network(
+    ClientVpnEndpointId='cvpn-endpoint-0be48f1d74b1ef899',
+    AssociationId= AssociationId,
+    )
+    print ('Target Network has been Disassociated')
+    
+    response_associate = client.associate_client_vpn_target_network(
+    ClientVpnEndpointId='cvpn-endpoint-0be48f1d74b1ef899',
+    SubnetId='subnet-f5e5cabd',
+   
+)
+    print ('Target Network has been Associated')
+    assoc_id = response_associate['AssociationId']
+    print(assoc_id)
+    response_lambda = client_lambda .update_function_configuration(
+    FunctionName='Associstion',
+    Environment={
+        'Variables': {
+            'AssociationId': assoc_id
+        }
+    },
+)
+   # print ('association id ')
+    
+    print('AssociationId', assoc_id)
+    return(assoc_id)

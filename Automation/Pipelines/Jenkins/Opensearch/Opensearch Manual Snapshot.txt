@@ -1,0 +1,60 @@
+#This document about to manual snapshot of AWS opensearch 
+
+#IAM Policy
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "iam:PassRole",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:iam::292603434312:role/opensearch-snapshot-role",
+                "arn:aws:s3:::aws-opensearch-snapshot"
+            ]
+        },
+        {
+            "Sid": "VisualEditor1",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject"
+            ],
+            "Resource": "arn:aws:s3:::aws-opensearch-snapshot/*"
+        },
+        {
+            "Sid": "VisualEditor2",
+            "Effect": "Allow",
+            "Action": "es:ESHttpPost",
+            "Resource": "arn:aws:es:eu-west-2:292603434312:domain/waf-dashboards"
+        }
+    ]
+}
+
+
+
+PUT /_snapshot/aws-opensearch  #aws-opensearch is the name of repo t be registered.
+{
+  "type": "s3",
+  "settings": {
+    "bucket": "aws-opensearch-snapshot",
+    "region": "eu-west-2",
+    "role_arn": "arn:aws:iam::292603434312:role/opensearch-snapshot-role"
+  }
+}
+
+#Refrence URL
+https://docs.aws.amazon.com/opensearch-service/latest/developerguide/managedomains-snapshots.html
+
+# Check status of snapshot
+
+curl -XGET 'https://search-waf-dashboards-xrmt7zcpvgk5dpm3qevwkcurs4.eu-west-2.es.amazonaws.com/_snapshot/_status'
+#Register snapshot repository
+
+curl -XPUT 'https://search-waf-dashboards-xrmt7zcpvgk5dpm3qevwkcurs4.eu-west-2.es.amazonaws.com/_snapshot/aws-opensearch/openseach-snapshot'
+#Check all snapshots
+curl -XGET 'https://search-waf-dashboards-xrmt7zcpvgk5dpm3qevwkcurs4.eu-west-2.es.amazonaws.com/_snapshot/aws-opensearch/_all?pretty'

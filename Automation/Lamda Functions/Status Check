@@ -1,0 +1,12 @@
+import json
+import boto3
+from pprint import pprint
+def lambda_handler(event, context):
+    # TODO implement
+    client = boto3.client("ec2")
+    status = client.describe_instance_status(IncludeAllInstances = False)
+    pprint(status)
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Hello from Lambda!')
+    }

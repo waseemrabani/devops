@@ -1,0 +1,32 @@
+
+
+#This policy will give ssh access to specific instance in SSM.
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "EC2",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:ResumeSession",
+                "ssm:TerminateSession",
+                "ssm:StartSession"
+            ],
+            "Resource": [
+                "arn:aws:ecs:*:915754239462:task/*",
+                "arn:aws:ec2:eu-west-1:915754239462:instance/i-06f6881c6bb9b8e09",
+                "arn:aws:ssm:*:915754239462:session/*"
+            ]
+        },
+        {
+            "Sid": "SSM",
+            "Effect": "Allow",
+            "Action": "ssm:DescribeSessions",
+            "Resource": "*"
+        }
+    ]
+}
+
+
+
+

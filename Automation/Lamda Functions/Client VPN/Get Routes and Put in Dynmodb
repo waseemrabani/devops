@@ -1,0 +1,35 @@
+import boto3
+import json
+
+#import string
+client = boto3.client('ec2')
+
+client1 = boto3.client('dynamodb')  
+
+def lambda_handler(event, context):
+    
+    response = client.describe_client_vpn_routes(
+    ClientVpnEndpointId='cvpn-endpoint-0be48f1d74b1ef899',
+    
+)
+    #print(response)
+    responselen = len(response ['Routes']) 
+    
+ #   responselentype = type(responselen)
+    print('responselen', responselen)
+    x = []
+    for Dcider in response ['Routes']:
+        Dciderr = Dcider ['DestinationCidr']
+        x.append(Dciderr)
+        #strings = str(Dciderr)
+        #ty = type(strings)
+        #print(ty)
+        #print()
+    # print(x)
+    # ty = type(x)
+    # print(ty)
+    
+    for y in x:
+        print(y)
+        response_db=client1.put_item(TableName='Routes', Item={'CIDR':{'S':y},})
+        

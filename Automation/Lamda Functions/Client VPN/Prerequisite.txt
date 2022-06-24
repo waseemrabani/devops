@@ -1,0 +1,17 @@
+To execute this Lambda Function you need following resource access in IAM role.
+
+AmazonEC2ReadOnlyAccess 
+ AmazonDynamoDBFullAccess 
+LambdaConfigUpdate
+ 
+ For LambdaConfigUpdate Policy you need to create a managed policy in IAM policies.
+ Create policy >Service > Lambda> Actions> Write >Resources> All resources.  Now create policy
+ 
+ You need to add Enviornment variable which is defined in Lambda function code.
+ 
+ Enviornment Variables
+ ClientVPN_ID			value
+ association_Id			value
+ Subnet_ID				value
+ 
+ Add AWS CLI Layer in ClientVPN_Second Lambda Function.

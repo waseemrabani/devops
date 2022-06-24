@@ -1,0 +1,62 @@
+import boto3
+import json
+import os
+from collections import defaultdict
+client = boto3.client('ec2')
+ec2 = boto3.resource('ec2')
+AMI = os.environ['AMI']
+INSTANCE_TYPE = os.environ['INSTANCE_TYPE']
+KEY_NAME = os.environ['KEY_NAME']
+SUBNET_ID = os.environ['SUBNET_ID']
+
+def lambda_handler(event, context):
+    
+    client = boto3.client('ec2')
+
+    running_instances = client.describe_instances(
+      Filters = [{
+         'Name': 'tag:Name',
+         'Values': ['Lamda-Test']
+       },
+       {
+        'Name': 'tag:App',
+        'Values': ['Yap-testing']
+     }]
+    
+    )
+    
+    instance_ids = []    
+    
+    for reservation in running_instances['Reservations']:
+        for instance in reservation['Instances']:
+            instance_ids.append(instance['InstanceId'])
+    print(instance_ids)
+    #print(type(instance_ids))
+    instance_idss=''.join(instance_ids)
+    ins_status = client.describe_instance_status(
+      InstanceIds=[
+          instance_idss,
+      ],
+  )
+    impaired_instance = ins_status['InstanceStatuses'][0]['InstanceStatus']['Status']
+    if impaired_instance == 'impaired':
+        instance = ec2.create_instances(
+            ImageId=AMI,
+            InstanceType=INSTANCE_TYPE,
+            KeyName=KEY_NAME,
+            SubnetId=SUBNET_ID,
+            MaxCount=1,
+            MinCount=1
+        )    
+        
+        
+        print('instance is impaired')
+        print("New instance created:", instance[0].id)
+    else:
+        print('intsance is ok')
+        
+  
+    return(impaired_instance)
+    
+    
+    

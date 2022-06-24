@@ -1,0 +1,35 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ClientVPNEndpoint",
+            "Effect": "Allow",
+            "Action": [
+                "lambda:UpdateFunctionEventInvokeConfig",
+                "ec2:DescribeClientVpnRoutes",
+                "dynamodb:PutItem",
+                "ec2:CreateClientVpnRoute",
+                "ec2:DisassociateClientVpnTargetNetwork",
+                "lambda:GetFunction",
+                "lambda:UpdateFunctionConfiguration",
+                "dynamodb:Scan",
+                "ec2:DescribeClientVpnTargetNetworks",
+                "ec2:AssociateClientVpnTargetNetwork",
+                "dynamodb:DeleteTable",
+                "ec2:AssociateVpcCidrBlock",
+                "dynamodb:CreateTable",
+                "lambda:UpdateFunctionCode",
+                "ec2:CreateClientVpnEndpoint",
+                "ec2:AssociateSubnetCidrBlock",
+                "ec2:DescribeClientVpnEndpoints"
+            ],
+            "Resource": [
+                "arn:aws:lambda:eu-west-1:915754239462:function:ClientVPN_First",
+                "arn:aws:dynamodb:eu-west-1:915754239462:table/AllRoutesVPN",
+                "arn:aws:ec2:eu-west-1:915754239462:subnet/subnet-f5e5cabd",
+                "arn:aws:ec2:eu-west-1:915754239462:vpc/vpc-f2e3018b",
+                "arn:aws:ec2:eu-west-1:915754239462:client-vpn-endpoint/cvpn-endpoint-01ca0e603c737b527"
+            ]
+        }
+    ]
+}

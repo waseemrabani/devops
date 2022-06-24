@@ -1,0 +1,110 @@
+#This policy is about giving SSH access to specific instance using session manager in SSM
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "SSO",
+            "Effect": "Allow",
+            "Action": [
+                "sso:ListDirectoryAssociations*",
+                "identitystore:DescribeUser"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "EC2",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:ResumeSession",
+                "ssm:TerminateSession",
+                "ssm:StartSession"
+            ],
+            "Resource": [
+                "arn:aws:ecs:*:915754239462:task/*",
+                "arn:aws:ec2:eu-west-1:915754239462:instance/i-06f6881c6bb9b8e09",
+                "arn:aws:ssm:*:915754239462:session/*"
+            ]
+        },
+        {
+            "Sid": "SSM",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:DescribeInstanceProperties",
+                "ssm:GetCommandInvocation",
+                "ssm:GetInventorySchema"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "TerminateSession",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:TerminateSession"
+            ],
+            "Resource": "*",
+            "Condition": {
+                "StringLike": {
+                    "ssm:resourceTag/aws:ssmmessages:session-id": [
+                        "${aws:userName}"
+                    ]
+                }
+            }
+        },
+        {
+            "Sid": "SSMGetDocument",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetDocument"
+            ],
+            "Resource": [
+                "arn:aws:ssm:*:*:document/AWS-StartPortForwardingSession",
+                "arn:aws:ssm:*:*:document/SSM-SessionManagerRunShell"
+            ]
+        },
+        {
+            "Sid": "SSMStartSession",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:StartSession"
+            ],
+            "Resource": [
+                "arn:aws:ec2:*:*:instance/*",
+                "arn:aws:ssm:*:*:session-manager/*",
+                "arn:aws:ssm:*:*:document/AWS-StartPortForwardingSession"
+            ],
+            "Condition": {
+                "BoolIfExists": {
+                    "ssm:SessionDocumentAccessCheck": "true"
+                }
+            }
+        },
+        {
+            "Sid": "SSMSendCommand",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:SendCommand"
+            ],
+            "Resource": [
+                "arn:aws:ec2:*:*:instance/*",
+                "arn:aws:ssm:*:*:session-manager/*",
+                "arn:aws:ssm:*:*:document/AWSSSO-CreateSSOUser"
+            ],
+            "Condition": {
+                "BoolIfExists": {
+                    "ssm:SessionDocumentAccessCheck": "true"
+                }
+            }
+        },
+        {
+            "Sid": "GuiConnect",
+            "Effect": "Allow",
+            "Action": [
+                "ssm-guiconnect:CancelConnection",
+                "ssm-guiconnect:GetConnection",
+                "ssm-guiconnect:StartConnection"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

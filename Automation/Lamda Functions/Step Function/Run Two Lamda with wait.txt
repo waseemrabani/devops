@@ -1,0 +1,22 @@
+{
+  "Comment": "VPN Routes Backup and Restore",
+  "StartAt": "ClientVPN_First",
+  "States": {
+    "ClientVPN_First": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:eu-west-1:915754239462:function:ClientVPN_First",
+      "Next": "wait_seconds"
+    },
+   "wait_seconds": {
+  "Type": "Wait",
+  "Seconds":900,
+  "Next": "ClientVPN_Second"
+  },
+   
+    "ClientVPN_Second": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:eu-west-1:915754239462:function:ClientVPN_Second",
+      "End": true
+    }
+  }
+}

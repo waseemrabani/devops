@@ -1,0 +1,18 @@
+{
+  "Comment": "VPN Routes BAckup and Restore",
+  "StartAt": "ClientVPN_First",
+  "States": {
+    "ClientVPN_First": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:eu-west-1:915754239462:function:ClientVPN_First",
+      "Next": "ClientVPN_Second"
+    },
+    
+   
+    "ClientVPN_Second": {
+      "Type": "Pass",
+      "Result": "arn:aws:lambda:eu-west-1:915754239462:function:ClientVPN_Second",
+      "End": true
+    }
+  }
+}

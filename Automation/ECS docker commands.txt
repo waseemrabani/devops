@@ -1,0 +1,21 @@
+sudo aws ecr get-login-password --region eu-west-1 | sudo docker login --username AWS --password-stdin 409947039396.dkr.ecr.eu-west-1.amazonaws.com
+sudo aws ecr get-login-password --region eu-central-1 | sudo docker login --username AWS --password-stdin 409947039396.dkr.ecr.eu-west-1.amazonaws.com
+docker pull 409947039396.dkr.ecr.eu-central-1.amazonaws.com/o2o/ras_relay:production_20220518_184
+
+
+sudo docker image build --build-arg BUILDER_TYPE=development -f Dockerfile -t stg-gp-relay .
+
+sudo docker tag stg-gp-relay:latest 409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-relay:latest
+
+sudo docker push 409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-relay:latest
+
+sudo docker image build --build-arg BUILDER_TYPE=development -f Dockerfile -t stg-gp-ras-scripts .
+sudo docker tag stg-gp-ras-scripts:latest 409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-ras-scripts:latest
+sudo docker push 409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-ras-scripts:latest
+
+
+sudo docker image build --build-arg BUILDER_TYPE=development -f Dockerfile -t stg-gp-auctionwebsocket .
+sudo docker tag stg-gp-auctionwebsocket:latest 409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-auctionwebsocket:latest
+sudo docker push 409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-auctionwebsocket:latest
+
+&7sPmO%sX6rf

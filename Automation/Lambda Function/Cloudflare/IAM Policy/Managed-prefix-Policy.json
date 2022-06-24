@@ -1,0 +1,26 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "ManagedPrefixList",
+            "Effect": "Allow",
+            "Action": [
+                "ec2:GetManagedPrefixListEntries",
+                "ec2:ModifyManagedPrefixList"
+            ],
+            "Resource": [
+                "arn:aws:ec2:eu-west-1:915754239462:prefix-list/pl-03b8f7374414c73bc",
+                "arn:aws:lambda:eu-west-1:915754239462:function:cloudflare"
+            ]
+        },
+        {
+            "Sid": "DescribePreFix",
+            "Effect": "Allow",
+            "Action": "ec2:DescribeManagedPrefixLists",
+            "Resource": "*"
+        },
+        {
+            "Sid": "Cloudwatch",
+            "Effect": "Allow",
+            "Action": "logs:*",
+            "Resource": "*"

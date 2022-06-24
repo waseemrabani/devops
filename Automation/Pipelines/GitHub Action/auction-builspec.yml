@@ -1,0 +1,37 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - cd auction-websockets
+      - node -v
+      - npm -v
+      - ls -la
+      - pwd
+      - echo Logging in to ECR...
+      - aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin 409947039396.dkr.ecr.eu-west-1.amazonaws.com
+      #- Base_REPOSITORY_URI=409947039396.dkr.ecr.eu-west-1.amazonaws.com/base-goplay-auctionwebsockets
+      - REPOSITORY_URI=409947039396.dkr.ecr.eu-west-1.amazonaws.com/stg-gp-auction-web
+      #- COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=latest
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      #- docker image  build --build-arg BUILDER_TYPE=development -f Dockerfile.base -t $Base_REPOSITORY_URI:latest .
+      - docker image  build --build-arg BUILDER_TYPE=development -f Dockerfile -t $REPOSITORY_URI:latest .
+      #- docker tag $Base_REPOSITORY_URI:latest $Base_REPOSITORY_URI:$IMAGE_TAG
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Logging in to Amazon ECR...
+      #- echo Pushing the Docker Base image
+      #- docker push $Base_REPOSITORY_URI:latest
+      #- docker push $Base_REPOSITORY_URI:$IMAGE_TAG
+      - echo Pushing the Docker image
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo Writing image definitions file...
+      - printf '[{"name":"stg-gp-auction-web","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > $CODEBUILD_SRC_DIR/imagedefinitions.json
+artifacts:
+    files: imagedefinitions.json
